@@ -4,6 +4,87 @@ Registro incremental de mudanças funcionais por versão. Ordem cronológica rev
 
 ---
 
+## Próxima versão — correções pós-coleta Autopilot
+
+Análise da coleta de 01–02/09/2026 (`temp/RD-COLETOR-2`, 3805 lojas): B12 100% `OFFLINE`
+nas 4 execuções, runs presas em `RUNNING`, runs marcadas `SUCCESS` com etapa 100% falha,
+`tb_scan_runs.total_items = 0` no Hardware e `coletor.log` (6,7 MB) só com ruído do paramiko.
+
+- **Fix crítico B12 — sonda TCP com argumentos trocados (`scan_core.run_b12_check`):**
+  a chamada era `test_tcp_port(ip, timeout, ssh_port)` mas a assinatura é
+  `test_tcp_port(ip, port, timeout)` — sondava a **porta 5** com timeout de 22 s em vez da
+  porta 22 com timeout de 5 s. Resultado: **todo B12 caía como `OFFLINE`
+  (`ssh_error = ssh_port_closed`)**, em qualquer loja, nas Abas 2 e 7. Corrigido para
+  `test_tcp_port(ip, ssh_port, timeout)`.
+- **`scan_runs.finish_scan_run` — status honesto:** quando o chamador pede `SUCCESS` mas
+  há itens registrados, reclassifica: `processed > 0` e `success == 0` ⇒ `FAILED`;
+  `success > 0` e `failed > 0` ⇒ `PARTIAL`. `CANCELLED`/`FAILED` explícitos preservados.
+  Uma etapa 100% falha (ex.: B12 todo `OFFLINE`) deixa de ser gravada como `SUCCESS` e passa
+  a ser detectada como incompleta na próxima execução (oferece "reescanear os que falharam").
+- **`finish_scan_run` — `total_items`:** o `UPDATE` passa a gravar
+  `total_items = max(total_items_atual, processed_items)`, corrigindo o `0` da etapa Hardware
+  do Autopilot (alvos só conhecidos após o Scan Loja).
+- **Runs órfãs em `RUNNING` (`scan_runs.reconcile_orphan_runs`):** nova função chamada no
+  arranque (`MainWindow.__init__`) que marca como `FAILED` toda run deixada `RUNNING` por um
+  processo anterior encerrado (crash/kill/sleep), com `error_message` e `finished_at`.
+- **Autopilot — finalização garantida:** se `_pipeline_worker` morre por exceção, o `finally`
+  agora fecha as runs `B12`/`SCAN_LOJA`/`HARDWARE` criadas como `FAILED`
+  (`pipeline interrompido por erro`) em vez de deixá-las `RUNNING`.
+- **Autopilot — motivo da falha B12 no rastreio:** `record_scan_item` da etapa B12 passa a
+  gravar `error_message = ssh_error` (ex.: `ssh_port_closed`), como a Aba 2 já fazia.
+- **`main.setup_logging` — ruído do paramiko:** `paramiko` / `paramiko.transport` fixados em
+  `WARNING`. Elimina o `INFO` por conexão (`Connected (version 2.0…)`,
+  `Authentication (password) successful!`) que dominava o `coletor.log` num scan de milhares
+  de hosts e escondia os erros reais.
+- **Retomada olhava runs de sessões antigas (`get_pending_items` + `_detect_incomplete_run`):**
+  a seleção era "a run mais recente com `status IN (RUNNING/FAILED/CANCELLED)`" — pulava por
+  cima de uma run **mais nova** já `SUCCESS` e reabria uma execução interrompida de 2 sessões
+  atrás. Foi o que fez a sessão de 02/09 15:06 reprocessar 3805 B12 + 32620 Scan Loja (os
+  itens registrados na run RUNNING órfã da sessão das 00:55), ignorando a sessão das 09:22 que
+  concluiu. Agora ambos olham **só a run mais recente de cada etapa** (a última sessão); se ela
+  terminou, a etapa está concluída e nada reabre. `_detect_incomplete_run` restringe a
+  `id IN (SELECT MAX(id) … GROUP BY scan_type)`.
+- **`get_pending_items` — "concluído" por etapa (antes só `status = 'SUCCESS'`):** o Scan Loja
+  grava o tipo do device (`PDV Linux`, `Offline`, …) e o B12 grava `OFFLINE`/`SUCCESS` — nunca
+  a string literal `'SUCCESS'`. Resultado: **todo item de Scan Loja era classificado como
+  falha**, e "completar o que faltou" refazia a loja inteira. Agora há classificação por etapa
+  (`_classify_item`): _sucesso_ = `PDV Linux`/`TC Linux`/`TC Win`/`IMPRESSORA`/`Offline` (Scan),
+  `SUCCESS` (B12/Hardware); _negativo definitivo_ = `OFFLINE` (B12) — "completar" pula, mas
+  "reescanear os que falharam" refaz; _falha_ = o resto (`ERRO_*`, `AUTH_FAILED`, …).
+- **`get_pending_items` — flag `complete`:** quando a última run da etapa terminou, devolve
+  `complete=True` e o conjunto de itens a pular; o Autopilot no modo "completar" pula a etapa
+  inteira em vez de refazê-la.
+- **`tab_4_hardware._select_pending_from_last_run`:** deixa de duplicar a lógica (que tinha o
+  mesmo bug de run antiga) e passa a chamar `scan_runs.get_pending_items(..., "HARDWARE")`.
+- **Diálogo de retomada:** título "Execução anterior não concluída" e texto conforme o motivo
+  real (`interrompida` / `cancelada` / `terminou com falha`).
+
+> Nota para o banco atual (`temp/RD-COLETOR-2`): as runs 10–12 já estão gravadas como
+> `SUCCESS` (código antigo), então o app corrigido **não** vai oferecer retomada do B12 nele —
+> rodar o Autopilot em **"Limpar e recomeçar"** ou usar a Aba 2 (`Offline` → `Reprocessar`).
+> Daqui pra frente, um B12 100% `OFFLINE` fica `FAILED` e a retomada é oferecida.
+
+### Aba 7 — UI e limites de workers
+
+- **3 barras de progresso por etapa** ("Progresso das Etapas (executam em paralelo)"): B12,
+  Scan Loja e Hardware. À direita de cada barra: **`processados/total  |  %`**.
+  - Refresh de **1 s** por um ticker (`_tick_bars` → `self.after(1000, …)` enquanto o worker
+    roda), além do refresh imediato a cada lote de conclusões.
+  - B12 e Scan Loja: total conhecido no início (`len(stores)` / `total_scan_targets`).
+  - **Hardware: total real** = `counts["hw_total"]`, soma dos dispositivos elegíveis
+    (`PDV Linux`/`TC Linux`/`TC Win`/`IMPRESSORA`) das lojas cujo Scan Loja já terminou.
+    Cresce enquanto o Scan roda (barra mostra `(parcial - Scan Loja em curso)`) e é o total
+    definitivo quando o Scan chega a 100%.
+  - **Contabilidade consistente nos modos "completar"/"reescanear":** itens pulados por já
+    estarem concluídos agora entram em `scan_done` / `hw_done` (antes só conclusões com
+    *future* contavam, e as barras nunca fechavam 100% numa retomada).
+  - Barras zeradas no início de cada execução (`_reset_stage_bars`); mantêm o estado final
+    após concluir/cancelar.
+- **Limites de workers ajustados ao coletor-alvo** (VM Xeon 10 vCPU, ~8 GB livres, rede
+  direta; WMI/Hardware é o gargalo de memória): padrão = teto —
+  **B12 20 (máx 20) · Scan Loja 40 (máx 40) · Hardware 10 (máx 10)**. Antes: 16/16/8 com
+  teto 64. Os spinboxes agora não deixam passar do teto recomendado.
+
 ## v1.25.09.26 — 01/09/2026
 - **Nova Aba 7 — Autopilot:** pipeline automático `B12 → Scan Loja → Hardware` por loja. Cada loja avança de etapa assim que a anterior termina (sucesso, ou falha no caso do B12), sem esperar o lote inteiro. Pools de workers independentes por etapa (padrão B12=16, Scan=16, Hardware=8) e timeouts próprios (B12=5s, Scan=2s).
 - **Aba 7 — seleção e entrada:** filtro por logomarca (`TODAS/DROGASIL/RAIA`) e faixa de JAVA; marcar/desmarcar/inverter; opção de importar um XLS de lojas antes de rodar (`Atualizar` = upsert, `Limpar e importar` = truncate) ou usar as lojas já importadas na Aba 1.

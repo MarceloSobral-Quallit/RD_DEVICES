@@ -11,7 +11,7 @@ from datetime import datetime
 from src.common import scan_core
 from src.common.config import ConfigManager
 from src.common.console_logger import ConsoleLogger
-from src.common.scan_runs import finish_scan_run, record_scan_item, start_scan_run
+from src.common.scan_runs import finish_scan_run, get_pending_items, record_scan_item, start_scan_run
 from src.common.treeview_sort import make_treeview_sortable
 
 try:
@@ -289,48 +289,17 @@ class Tab4ScanHardware(ttk.Frame):
 
     def _select_pending_from_last_run(self):
         try:
-            conn = self.config_mgr.get_sqlite_connection()
-            run = conn.execute(
-                """
-                SELECT id, total_items
-                FROM tb_scan_runs
-                WHERE scan_type = 'HARDWARE'
-                  AND status IN ('RUNNING', 'FAILED', 'CANCELLED')
-                ORDER BY id DESC
-                LIMIT 1
-                """
-            ).fetchone()
-            if not run:
-                conn.close()
+            info = get_pending_items(self.config_mgr, "HARDWARE")
+            if info.get("complete"):
+                self.console_logger.log(
+                    "O ultimo scan de hardware terminou — nada pendente.", "INFO")
+                return
+            if not info["run_id"]:
                 self.console_logger.log("Nenhum scan de hardware incompleto encontrado.", "INFO")
                 return
-            run_id = run[0]
-            expected_total = int(run[1] or 0)
-            done = {
-                row[0]
-                for row in conn.execute(
-                    """
-                    SELECT item_key
-                    FROM tb_scan_run_items
-                    WHERE run_id = ? AND status = 'SUCCESS'
-                    """,
-                    (run_id,),
-                )
-            }
-            candidates = {
-                row[0]
-                for row in conn.execute(
-                    """
-                    SELECT item_key
-                    FROM tb_scan_run_items
-                    WHERE run_id = ?
-                    """,
-                    (run_id,),
-                )
-            }
-            conn.close()
-            pending = candidates - done
-            include_unrecorded = expected_total > len(candidates)
+            pending = info["pending"]
+            done = info["done"]
+            include_unrecorded = info["include_unrecorded"]
             self.listbox_devices.selection_clear(0, tk.END)
             selected_count = 0
             for idx, dev in enumerate(self._visible_devices_data):
@@ -340,7 +309,8 @@ class Tab4ScanHardware(ttk.Frame):
                     selected_count += 1
             self._update_device_selected_label()
             self.console_logger.log(
-                f"Run {run_id}: {selected_count} pendentes selecionados; {len(done)} sucessos preservados.",
+                f"Run {info['run_id']}: {selected_count} pendentes selecionados; "
+                f"{len(done)} ja concluidos preservados.",
                 "INFO",
             )
         except Exception as e:

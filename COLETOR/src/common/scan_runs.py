@@ -5,63 +5,137 @@
 from datetime import datetime
 
 
+def reconcile_orphan_runs(config_mgr):
+    """Marca como FAILED qualquer run que ficou RUNNING de um processo anterior.
+
+    No arranque nenhuma run pode estar legitimamente RUNNING — se esta, o
+    processo que a abriu foi encerrado (crash, kill, sleep) sem finalizar.
+    Deixar em FAILED permite que o Autopilot a detecte e ofereca retomada, e
+    impede que o historico acumule runs eternamente "em andamento".
+    Retorna a quantidade de runs reconciliadas.
+    """
+    try:
+        conn = config_mgr.get_sqlite_connection()
+    except Exception:
+        return 0
+    try:
+        ensure_scan_tracking(conn)
+        cur = conn.execute(
+            """
+            UPDATE tb_scan_runs
+               SET status = 'FAILED',
+                   finished_at = COALESCE(finished_at, ?),
+                   error_message = CASE
+                       WHEN error_message IS NULL OR error_message = ''
+                       THEN 'processo encerrado sem finalizar a run'
+                       ELSE error_message
+                   END
+             WHERE status = 'RUNNING'
+            """,
+            (datetime.now().strftime("%Y-%m-%d %H:%M:%S"),),
+        )
+        conn.commit()
+        return cur.rowcount if cur.rowcount and cur.rowcount > 0 else 0
+    except Exception:
+        return 0
+    finally:
+        conn.close()
+
+
+INCOMPLETE_RUN_STATUSES = ("RUNNING", "FAILED", "CANCELLED")
+
+# Por etapa: statuses de item que representam uma coleta bem-sucedida.
+_SUCCESS_ITEM_STATUSES = {
+    "B12": {"SUCCESS", "ESCANEADO"},
+    "SCAN_LOJA": {"PDV Linux", "TC Linux", "TC Win", "IMPRESSORA", "Offline", "ESCANEADO"},
+    "HARDWARE": {"SUCCESS"},
+}
+# Por etapa: statuses que sao um resultado negativo *definitivo* — ja foram
+# verificados (o modo "completar o que faltou" os pula), mas continuam elegiveis
+# para o modo "reescanear os que falharam".
+_CHECKED_NEGATIVE_ITEM_STATUSES = {
+    "B12": {"OFFLINE"},
+    "SCAN_LOJA": set(),
+    "HARDWARE": set(),
+}
+
+
+def _classify_item(scan_type, status):
+    """'success' | 'checked' | 'failed' para um status de tb_scan_run_items."""
+    s = (status or "").strip()
+    if s in _SUCCESS_ITEM_STATUSES.get(scan_type, {"SUCCESS"}):
+        return "success"
+    if s in _CHECKED_NEGATIVE_ITEM_STATUSES.get(scan_type, set()):
+        return "checked"
+    return "failed"
+
+
 def get_pending_items(config_mgr, scan_type):
-    """Retorna o que falta concluir da ultima execucao incompleta de `scan_type`.
+    """Retorna o que falta concluir da *ultima* execucao de `scan_type`.
 
     Generaliza a logica que a Aba 4 usava so para hardware
     (`_select_pending_from_last_run`), para ser reaproveitada por qualquer etapa
     (B12, SCAN_LOJA, HARDWARE) — inclusive pelo Autopilot ao retomar apos uma
     interrupcao.
 
+    Olha SO a run mais recente da etapa (maior id). Se ela terminou (SUCCESS /
+    PARTIAL / etc.), a etapa esta concluida e nada fica pendente — runs
+    incompletas *mais antigas* (de sessoes anteriores ja substituidas) sao
+    historico e nao devem reabrir a etapa.
+
     Retorna dict com:
-      run_id: int | None — id da ultima run RUNNING/FAILED/CANCELLED, ou None se
-              nao houver nenhuma incompleta.
-      pending: set[str] — item_key ja registrados nesta run mas sem SUCCESS.
-      done: set[str] — item_key ja registrados com SUCCESS (preservar, nao repetir).
-      include_unrecorded: bool — True se a run tinha mais itens esperados do que
-              os que chegaram a ser registrados (ex.: interrompida antes de
-              registrar todo mundo) — nesse caso, qualquer item fora de `done`
-              deve ser tratado como pendente mesmo sem uma linha propria.
+      run_id: int | None — id da run mais recente se ela estiver incompleta
+              (RUNNING/FAILED/CANCELLED); None caso contrario.
+      done: set[str] — item_key a *pular* no modo "completar o que faltou"
+              (coleta bem-sucedida ou resultado negativo definitivo).
+      pending: set[str] — item_key a *refazer* no modo "reescanear os que
+              falharam" (falhas + resultados negativos definitivos).
+      include_unrecorded: bool — True se a run esperava mais itens do que os
+              registrados (interrompida cedo); nesse caso o Autopilot trata
+              qualquer item fora de `done` como pendente.
+      complete: bool — True se a ultima run da etapa ja terminou.
     """
+    empty = {"run_id": None, "pending": set(), "done": set(),
+             "include_unrecorded": False, "complete": False}
     conn = config_mgr.get_sqlite_connection()
     try:
         run = conn.execute(
             """
-            SELECT id, total_items
+            SELECT id, total_items, status
             FROM tb_scan_runs
             WHERE scan_type = ?
-              AND status IN ('RUNNING', 'FAILED', 'CANCELLED')
             ORDER BY id DESC
             LIMIT 1
             """,
             (scan_type,),
         ).fetchone()
         if not run:
-            return {"run_id": None, "pending": set(), "done": set(), "include_unrecorded": False}
+            return empty
 
-        run_id = run[0]
-        expected_total = int(run[1] or 0)
-        done = {
-            row[0]
-            for row in conn.execute(
-                "SELECT item_key FROM tb_scan_run_items WHERE run_id = ? AND status = 'SUCCESS'",
-                (run_id,),
-            )
-        }
-        candidates = {
-            row[0]
-            for row in conn.execute(
-                "SELECT item_key FROM tb_scan_run_items WHERE run_id = ?",
-                (run_id,),
-            )
-        }
-        pending = candidates - done
-        include_unrecorded = expected_total > len(candidates)
+        run_id, expected_total, status = run[0], int(run[1] or 0), run[2]
+        rows = conn.execute(
+            "SELECT item_key, status FROM tb_scan_run_items WHERE run_id = ?",
+            (run_id,),
+        ).fetchall()
+        candidates = {r[0] for r in rows}
+
+        if status not in INCOMPLETE_RUN_STATUSES:
+            # Ultima run terminou: etapa concluida. Nada a refazer; no modo
+            # "completar", todos os itens ja registrados sao pulados.
+            return {"run_id": None, "pending": set(), "done": set(candidates),
+                    "include_unrecorded": False, "complete": True}
+
+        success, checked, failed = set(), set(), set()
+        for key, st in rows:
+            bucket = _classify_item(scan_type, st)
+            (success if bucket == "success" else checked if bucket == "checked" else failed).add(key)
+
         return {
             "run_id": run_id,
-            "pending": pending,
-            "done": done,
-            "include_unrecorded": include_unrecorded,
+            "done": success | checked,      # "completar o que faltou" pula estes
+            "pending": failed | checked,    # "reescanear os que falharam" refaz estes
+            "include_unrecorded": expected_total > len(candidates),
+            "complete": False,
         }
     finally:
         conn.close()
@@ -192,9 +266,10 @@ def finish_scan_run(config_mgr, run_id, status="SUCCESS", error_message=""):
     conn = config_mgr.get_sqlite_connection()
     ensure_scan_tracking(conn)
     cur = conn.cursor()
-    cur.execute("SELECT scan_type FROM tb_scan_runs WHERE id = ?", (run_id,))
+    cur.execute("SELECT scan_type, total_items FROM tb_scan_runs WHERE id = ?", (run_id,))
     row = cur.fetchone()
     scan_type = row[0] if row else ""
+    expected_total = int(row[1] or 0) if row else 0
     if scan_type == "SCAN_LOJA":
         failed_expr = """
             status IN ('FAILED', 'AUTH_FAILED', 'ERRO')
@@ -218,11 +293,31 @@ def finish_scan_run(config_mgr, run_id, status="SUCCESS", error_message=""):
         (run_id,),
     )
     processed, success, failed, cancelled = cur.fetchone()
+    processed = processed or 0
+    success = success or 0
+    failed = failed or 0
+    cancelled = cancelled or 0
+
+    # Status honesto: um "SUCCESS" onde nada foi coletado nao e sucesso.
+    # So reclassifica quando o chamador pediu SUCCESS — CANCELLED/FAILED
+    # explicitos sao preservados.
+    effective_status = status
+    if status == "SUCCESS" and processed > 0:
+        if success == 0:
+            effective_status = "FAILED"
+        elif failed > 0:
+            effective_status = "PARTIAL"
+
+    # total_items pode ter sido aberto como 0 (ex.: HARDWARE no Autopilot, cujos
+    # alvos so sao conhecidos apos o Scan Loja). Nunca deixar abaixo do processado.
+    total_fallback = max(int(expected_total or 0), processed)
+
     conn.execute(
         """
         UPDATE tb_scan_runs
            SET status = ?,
                finished_at = ?,
+               total_items = ?,
                processed_items = ?,
                success_items = ?,
                failed_items = ?,
@@ -231,12 +326,13 @@ def finish_scan_run(config_mgr, run_id, status="SUCCESS", error_message=""):
          WHERE id = ?
         """,
         (
-            status,
+            effective_status,
             datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            processed or 0,
-            success or 0,
-            failed or 0,
-            cancelled or 0,
+            total_fallback,
+            processed,
+            success,
+            failed,
+            cancelled,
             str(error_message or ""),
             run_id,
         ),

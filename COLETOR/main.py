@@ -74,6 +74,12 @@ def setup_logging():
     stream_handler.setFormatter(fmt)
     root_logger.addHandler(stream_handler)
 
+    # paramiko emite um INFO por conexao ("Connected (version 2.0...)",
+    # "Authentication (password) successful!"). Num scan de milhares de hosts
+    # isso domina o coletor.log e esconde os erros reais.
+    for noisy in ("paramiko", "paramiko.transport", "paramiko.transport.sftp"):
+        logging.getLogger(noisy).setLevel(logging.WARNING)
+
     identity = app_identity()
     root_logger.info("=" * 72)
     root_logger.info(

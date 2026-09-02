@@ -74,9 +74,20 @@ class MainWindow:
         self.root = root
         self.cfg = ConfigManager()
         self.tab_instances = []
+        self._reconcile_orphan_runs()
         self.setup_ui()
         self.root.protocol("WM_DELETE_WINDOW", self.on_close)
         logger.info("MainWindow initialized")
+
+    def _reconcile_orphan_runs(self):
+        """Fecha runs deixadas RUNNING por um processo anterior encerrado."""
+        try:
+            from common.scan_runs import reconcile_orphan_runs
+            n = reconcile_orphan_runs(self.cfg)
+            if n:
+                logger.warning("%d run(s) orfa(s) marcada(s) como FAILED no arranque.", n)
+        except Exception:
+            logger.exception("Falha ao reconciliar runs orfas")
     
     def setup_ui(self):
         """Criar interface com menu, abas, status bar."""

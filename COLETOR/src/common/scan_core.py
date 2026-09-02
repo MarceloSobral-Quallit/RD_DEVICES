@@ -305,7 +305,8 @@ def run_b12_check(target, timeout, user, password, ssh_port, collect_detail, on_
     java = target["java"]
     filial = target["filial"]
     nome = target["nome"]
-    ssh_open = test_tcp_port(ip, timeout, ssh_port)
+    # NB: assinatura e test_tcp_port(ip, port, timeout) — nao inverter a ordem.
+    ssh_open = test_tcp_port(ip, ssh_port, timeout)
     if ssh_open:
         if collect_detail:
             b12_data = collect_b12_complete_data(ip, java, filial, nome, timeout, user, password, ssh_port, on_log=on_log)

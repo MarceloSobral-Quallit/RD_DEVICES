@@ -114,17 +114,19 @@ class Tab7Autopilot(ttk.Frame):
 
         frame_options = ttk.LabelFrame(self, text="Opcoes do Pipeline", padding=8)
         frame_options.pack(fill=tk.X, padx=10, pady=4)
+        # Limites recomendados para o coletor-alvo (VM 10 vCPU, ~8 GB livres,
+        # rede direta). Sao os tetos: WMI (Hardware) e o consumidor de memoria.
         ttk.Label(frame_options, text="Workers B12:").pack(side=tk.LEFT)
-        self.spin_workers_b12 = ttk.Spinbox(frame_options, from_=1, to=64, width=4)
-        self.spin_workers_b12.set(16)
+        self.spin_workers_b12 = ttk.Spinbox(frame_options, from_=1, to=20, width=4)
+        self.spin_workers_b12.set(20)
         self.spin_workers_b12.pack(side=tk.LEFT, padx=(2, 10))
         ttk.Label(frame_options, text="Workers Scan:").pack(side=tk.LEFT)
-        self.spin_workers_scan = ttk.Spinbox(frame_options, from_=1, to=64, width=4)
-        self.spin_workers_scan.set(16)
+        self.spin_workers_scan = ttk.Spinbox(frame_options, from_=1, to=40, width=4)
+        self.spin_workers_scan.set(40)
         self.spin_workers_scan.pack(side=tk.LEFT, padx=(2, 10))
         ttk.Label(frame_options, text="Workers Hardware:").pack(side=tk.LEFT)
-        self.spin_workers_hw = ttk.Spinbox(frame_options, from_=1, to=64, width=4)
-        self.spin_workers_hw.set(8)
+        self.spin_workers_hw = ttk.Spinbox(frame_options, from_=1, to=10, width=4)
+        self.spin_workers_hw.set(10)
         self.spin_workers_hw.pack(side=tk.LEFT, padx=(2, 10))
 
         row_opts2 = ttk.Frame(frame_options)
@@ -151,6 +153,21 @@ class Tab7Autopilot(ttk.Frame):
                  "limpar e recomecar / completar o que faltou / reescanear falhas)",
             foreground="gray",
         ).pack(side=tk.LEFT, padx=12)
+
+        frame_stage = ttk.LabelFrame(self, text="Progresso das Etapas (executam em paralelo)", padding=8)
+        frame_stage.pack(fill=tk.X, padx=10, pady=4)
+        self._stage_bars = {}
+        self._stage_lbls = {}
+        for key, label in (("b12", "B12"), ("scan", "Scan Loja"), ("hw", "Hardware")):
+            row = ttk.Frame(frame_stage)
+            row.pack(fill=tk.X, pady=2)
+            ttk.Label(row, text=f"{label}:", width=10).pack(side=tk.LEFT)
+            bar = ttk.Progressbar(row, mode="determinate", maximum=100)
+            bar.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 8))
+            lbl = ttk.Label(row, text="—", width=34, anchor=tk.W)
+            lbl.pack(side=tk.LEFT)
+            self._stage_bars[key] = bar
+            self._stage_lbls[key] = lbl
 
         frame_progress = ttk.LabelFrame(self, text="Progresso por Loja", padding=8)
         frame_progress.pack(fill=tk.BOTH, expand=True, padx=10, pady=4)
@@ -333,6 +350,56 @@ class Tab7Autopilot(ttk.Frame):
 
     def _update_status_label(self, text):
         self.lbl_status.config(text=text)
+
+    def _set_stage_bar(self, key, done, total, note=""):
+        """Atualiza uma das 3 barras de etapa. Chamado sempre via self.after."""
+        bar = self._stage_bars.get(key)
+        lbl = self._stage_lbls.get(key)
+        if bar is None:
+            return
+        done = int(done or 0)
+        total = max(int(total or 0), done)
+        pct = (done / total * 100.0) if total else 0.0
+        bar["value"] = pct
+        # A direita da barra: processados/total (+ % e nota opcional).
+        txt = f"{done}/{total}" if total else "0/0"
+        if total:
+            txt += f"  |  {pct:.0f}%"
+        if note:
+            txt += f"  {note}"
+        lbl.config(text=txt)
+
+    def _refresh_stage_bars(self, b12_done, b12_total, scan_done, scan_total,
+                            hw_done, hw_total, hw_final):
+        self._set_stage_bar("b12", b12_done, b12_total)
+        self._set_stage_bar("scan", scan_done, scan_total)
+        self._set_stage_bar(
+            "hw", hw_done, hw_total,
+            note="" if hw_final else "(parcial - Scan Loja em curso)",
+        )
+
+    def _reset_stage_bars(self):
+        for key in ("b12", "scan", "hw"):
+            self._set_stage_bar(key, 0, 0)
+
+    def _start_bar_ticker(self):
+        """Agenda o refresh de 1 s das 3 barras enquanto o pipeline roda."""
+        self._tick_bars()
+
+    def _tick_bars(self):
+        st = getattr(self, "_live_bar_state", None)
+        if st:
+            c = st["counts"]
+            total_scan = st["total_scan"]
+            scan_ok = bool(st["prog"].get("scan_ok")
+                           or (total_scan and c["scan_done"] >= total_scan))
+            self._refresh_stage_bars(
+                c["b12_done"], st["nstores"],
+                c["scan_done"], total_scan,
+                c["hw_done"], c["hw_total"], scan_ok,
+            )
+        if self._worker_running:
+            self.after(1000, self._tick_bars)
 
     def _log(self, msg, level="INFO"):
         if self._mute_logs:
@@ -548,18 +615,32 @@ class Tab7Autopilot(ttk.Frame):
     )
 
     def _detect_incomplete_run(self):
-        """Retorna {run_id, status, started_at} da execucao de Autopilot mais
-        recente que nao terminou (RUNNING/FAILED/CANCELLED), ou None."""
+        """Retorna {run_id, status, started_at} se a *ultima sessao* de Autopilot
+        nao terminou, ou None.
+
+        So considera a run mais recente de cada etapa (B12/SCAN_LOJA/HARDWARE) —
+        ou seja, a ultima sessao. Runs incompletas de sessoes anteriores ja
+        substituidas por uma sessao que terminou sao historico e nao devem
+        reabrir o dialogo de retomada.
+        """
         try:
             conn = self.config_mgr.get_sqlite_connection()
         except Exception:
             return None
         try:
             row = conn.execute(
-                "SELECT id, status, started_at FROM tb_scan_runs "
-                "WHERE source_tab = 'autopilot' "
-                "  AND status IN ('RUNNING', 'FAILED', 'CANCELLED') "
-                "ORDER BY id DESC LIMIT 1"
+                """
+                SELECT id, status, started_at
+                FROM tb_scan_runs
+                WHERE source_tab = 'autopilot'
+                  AND id IN (
+                      SELECT MAX(id) FROM tb_scan_runs
+                      WHERE source_tab = 'autopilot'
+                      GROUP BY scan_type
+                  )
+                  AND status IN ('RUNNING', 'FAILED', 'CANCELLED')
+                ORDER BY id DESC LIMIT 1
+                """
             ).fetchone()
         except Exception:
             row = None
@@ -573,13 +654,18 @@ class Tab7Autopilot(ttk.Frame):
         """Dialogo modal com as 3 opcoes. Retorna 'fresh'|'resume'|'retry_failed'
         ou None (cancelar)."""
         dlg = tk.Toplevel(self)
-        dlg.title("Execucao anterior interrompida")
+        dlg.title("Execucao anterior nao concluida")
         dlg.transient(self.winfo_toplevel())
         dlg.resizable(False, False)
         choice = {"v": None}
 
+        _motivo = {
+            "RUNNING": "foi interrompida antes de terminar",
+            "CANCELLED": "foi cancelada",
+            "FAILED": "terminou com falha",
+        }.get(info["status"], "nao terminou")
         msg = (
-            f"A ultima execucao do Autopilot nao terminou\n"
+            f"A ultima execucao do Autopilot {_motivo}\n"
             f"(run #{info['run_id']}, {info['status']}, iniciada em {info['started_at']}).\n\n"
             "Como continuar?"
         )
@@ -670,6 +756,7 @@ class Tab7Autopilot(ttk.Frame):
         self.btn_cancel.config(state=tk.NORMAL)
         self.tree_progress.delete(*self.tree_progress.get_children())
         self._store_row_iid = {}
+        self._reset_stage_bars()
         threading.Thread(target=self._pipeline_worker, daemon=True).start()
 
     def _pipeline_done(self):
@@ -709,6 +796,8 @@ class Tab7Autopilot(ttk.Frame):
     # ------------------------------------------------------------------
 
     def _pipeline_worker(self):
+        run_ids = {}
+        pipeline_finalized = False
         try:
             xls_path = self.var_xls_path.get().strip()
             if xls_path:
@@ -757,15 +846,22 @@ class Tab7Autopilot(ttk.Frame):
 
             done_b12 = done_scan = done_hw = set()
             retry_b12 = retry_scan = retry_hw = set()
+            stage_complete = {"b12": False, "scan": False, "hw": False}
             if mode == "fresh":
                 self._clear_collected_data()
             else:
                 for scan_type, kind in (("B12", "b12"), ("SCAN_LOJA", "scan"), ("HARDWARE", "hw")):
                     info = get_pending_items(self.config_mgr, scan_type)
-                    if not info["run_id"]:
+                    if not info["run_id"] and not info.get("complete"):
                         continue
-                    done = set() if info["include_unrecorded"] else info["done"]
-                    pend = info["pending"]
+                    # `complete`: a ultima run da etapa terminou — no modo "resume"
+                    # todos os itens registrados sao pulados; nada fica pendente.
+                    stage_complete[kind] = bool(info.get("complete"))
+                    if info.get("complete"):
+                        done, pend = info["done"], set()
+                    else:
+                        done = set() if info["include_unrecorded"] else info["done"]
+                        pend = info["pending"]
                     if kind == "b12":
                         done_b12, retry_b12 = done, pend
                     elif kind == "scan":
@@ -784,12 +880,20 @@ class Tab7Autopilot(ttk.Frame):
                         "Cada etapa refaz somente os itens ja marcados como falha.",
                         "INFO",
                     )
-                elif done_b12 or done_scan or done_hw:
-                    self._log(
-                        f"Retomando: {len(done_b12)} B12, {len(done_scan)} Scan Loja, "
-                        f"{len(done_hw)} Hardware ja concluidos serao pulados.",
-                        "INFO",
-                    )
+                elif mode == "resume":
+                    if all(stage_complete.values()):
+                        self._log(
+                            "Todas as etapas da ultima sessao ja terminaram — nada a completar. "
+                            "Use 'Limpar e recomecar' para uma coleta nova.",
+                            "SUCCESS",
+                        )
+                        return
+                    if done_b12 or done_scan or done_hw:
+                        self._log(
+                            f"Retomando: {len(done_b12)} B12, {len(done_scan)} Scan Loja, "
+                            f"{len(done_hw)} Hardware ja concluidos serao pulados.",
+                            "INFO",
+                        )
 
             def keep_item(key, done_set, retry_set):
                 if mode == "retry_failed":
@@ -836,11 +940,11 @@ class Tab7Autopilot(ttk.Frame):
                 store_targets[s['filial']] = targets
                 total_scan_targets += len(targets)
 
-            run_ids = {
+            run_ids.update({
                 "B12": start_scan_run(self.config_mgr, "B12", "autopilot", total_items=len(stores), selected_count=len(stores)),
                 "SCAN_LOJA": start_scan_run(self.config_mgr, "SCAN_LOJA", "autopilot", total_items=total_scan_targets, selected_count=total_scan_targets),
                 "HARDWARE": start_scan_run(self.config_mgr, "HARDWARE", "autopilot", total_items=0, selected_count=0),
-            }
+            })
 
             b12_pool = ThreadPoolExecutor(max_workers=workers_b12)
             scan_pool = ThreadPoolExecutor(max_workers=workers_scan)
@@ -851,17 +955,44 @@ class Tab7Autopilot(ttk.Frame):
             scan_results = {}
             held_scan = []
             held_hw = []
-            counts = {"b12_done": 0, "scan_done": 0, "hw_done": 0}
+            # hw_total = total REAL de alvos de hardware — soma dos dispositivos
+            # elegiveis das lojas cujo Scan Loja ja terminou (cresce enquanto o
+            # Scan roda; vira o total definitivo quando o Scan chega a 100%).
+            # hw_submitted = os que foram de fato enfileirados (exclui os pulados
+            # nos modos "completar"/"reescanear").
+            counts = {"b12_done": 0, "scan_done": 0, "hw_done": 0,
+                      "hw_submitted": 0, "hw_total": 0}
             prog = {"last": 0, "b12_ok": False, "scan_ok": False}
+
+            def _scan_finished():
+                return bool(prog["scan_ok"]
+                            or (total_scan_targets and counts["scan_done"] >= total_scan_targets))
+
+            def _push_bars():
+                self.after(
+                    0, self._refresh_stage_bars,
+                    counts["b12_done"], len(stores),
+                    counts["scan_done"], total_scan_targets,
+                    counts["hw_done"], counts["hw_total"], _scan_finished(),
+                )
+
+            # Estado lido pelo ticker de 1 s (dicts mutados pelo worker; leitura
+            # de inteiros entre threads e segura para exibicao).
+            self._live_bar_state = {
+                "counts": counts, "prog": prog,
+                "nstores": len(stores), "total_scan": total_scan_targets,
+            }
+            self.after(0, self._start_bar_ticker)
 
             def _log_progress(force=False):
                 total = counts["b12_done"] + counts["scan_done"] + counts["hw_done"]
+                _push_bars()
                 if force or total - prog["last"] >= 20:
                     prog["last"] = total
                     self._log(
                         f"Progresso — B12 {counts['b12_done']}/{len(stores)} | "
                         f"Scan {counts['scan_done']}/{total_scan_targets} | "
-                        f"Hardware {counts['hw_done']}",
+                        f"Hardware {counts['hw_done']}/{counts['hw_submitted']}",
                         "INFO",
                     )
                 if not prog["b12_ok"] and counts["b12_done"] >= len(stores):
@@ -910,6 +1041,8 @@ class Tab7Autopilot(ttk.Frame):
                     return
                 to_submit = [t for t in targets if keep_item(f"{t[0]}|{t[2]}", done_scan, retry_scan)]
                 skipped = len(targets) - len(to_submit)
+                if skipped:
+                    counts["scan_done"] += skipped   # alvos ja verificados contam no total
                 if not to_submit:
                     self.after(0, self._update_store_row, s['filial'], 'scan', f'ja concluido ({skipped})')
                     advance_to_hw(s)
@@ -934,14 +1067,18 @@ class Tab7Autopilot(ttk.Frame):
                     {"filial": str(r[0]), "ip": str(r[1]), "device_type": str(r[2] or ''), "bandeira": str(r[3] or '')}
                     for r in rows
                 ]
+                counts["hw_total"] += len(devices)   # total REAL de alvos de hardware
                 to_submit = [d for d in devices if keep_item(f"{d['filial']}|{d['ip']}", done_hw, retry_hw)]
                 skipped = len(devices) - len(to_submit)
+                if skipped:
+                    counts["hw_done"] += skipped      # dispositivos ja concluidos contam no total
                 if not devices:
                     self.after(0, self._update_store_row, s['filial'], 'hw', 'sem dispositivos')
                     return
                 if not to_submit:
                     self.after(0, self._update_store_row, s['filial'], 'hw', f'ja concluido ({skipped})')
                     return
+                counts["hw_submitted"] += len(to_submit)
                 for dev in to_submit:
                     f = hw_pool.submit(scan_core.run_hardware_scan, dev, hw_creds, self._log)
                     pending[f] = ("HW", s)
@@ -954,6 +1091,7 @@ class Tab7Autopilot(ttk.Frame):
             submit_b12()
             self.after(0, self._update_status_label,
                        f"B12: {counts['b12_done']}/{len(stores)} | Scan: 0/{total_scan_targets} | Hardware: 0")
+            _push_bars()
 
             while pending and not self.stop_event.is_set():
                 if not self.pause_event.is_set():
@@ -990,6 +1128,7 @@ class Tab7Autopilot(ttk.Frame):
                                 status=b12_data.get('collection_status') or ('SUCCESS' if res.get('ssh') else 'OFFLINE'),
                                 action="saved" if b12_data else "processed",
                                 result_ref="tb_devices_detail" if b12_data else "",
+                                error_message=b12_data.get('ssh_error') or "",
                             )
                             self.after(0, self._update_store_row, s['filial'], 'b12', status_text)
                         advance_to_scan(s)
@@ -1051,12 +1190,14 @@ class Tab7Autopilot(ttk.Frame):
             final_status = "CANCELLED" if cancelled else "SUCCESS"
             for stage in ("B12", "SCAN_LOJA", "HARDWARE"):
                 finish_scan_run(self.config_mgr, run_ids.get(stage), final_status)
+            pipeline_finalized = True
+            _push_bars()
 
             if not cancelled:
                 self._log(
                     f"Resumo — B12 {counts['b12_done']}/{len(stores)} | "
                     f"Scan {counts['scan_done']}/{total_scan_targets} | "
-                    f"Hardware {counts['hw_done']}.",
+                    f"Hardware {counts['hw_done']}/{counts['hw_submitted']}.",
                     "INFO",
                 )
                 self._log("Pipeline concluido.", "SUCCESS")
@@ -1064,5 +1205,13 @@ class Tab7Autopilot(ttk.Frame):
         except Exception as e:
             self._log(f"Erro no pipeline: {e}", "ERROR")
         finally:
+            # Nao deixar runs abertas (RUNNING) se o worker morreu no meio.
+            if not pipeline_finalized:
+                for stage in ("B12", "SCAN_LOJA", "HARDWARE"):
+                    try:
+                        finish_scan_run(self.config_mgr, run_ids.get(stage), "FAILED",
+                                        "pipeline interrompido por erro")
+                    except Exception:
+                        pass
             self._worker_running = False
             self.after(0, self._pipeline_done)
