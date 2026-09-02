@@ -1,0 +1,9 @@
+config.ini
+config.*.ini
+!config.ini.template
+.integrador_secret.key
+*.key
+*.db
+*.sqlite
+*.sqlite3
+__pycache__/

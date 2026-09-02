@@ -1,0 +1,55 @@
+# =====================================================================
+# Configurações locais e segredos (NUNCA versionar)
+# =====================================================================
+config.ini
+config.*.ini
+config.web.php
+*.db
+*.db-shm
+*.db-wal
+*.db-journal
+*.sqlite
+*.sqlite3
+*.key
+.coletor_secret.key
+.integrador_secret.key
+
+# Certificados / chaves de assinatura de código
+*.pfx
+*.p12
+*.pem
+tools/certs/
+
+# Backups manuais / arquivos substituídos
+*.OK_*
+*.bak
+*.orig
+
+# =====================================================================
+# Python
+# =====================================================================
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# =====================================================================
+# Build / logs / artefatos / temporários
+# =====================================================================
+build/
+dist/
+logs/
+temp/
+backups/
+release/
+*.log
+
+# =====================================================================
+# Histórico de sessão e base histórica de referência (grandes)
+# =====================================================================
+.specstory/
+PROJETO_ORIGINAL/
+
+# Analises de sessao (transcricoes; contem IPs/creds internos) — manter local
+/análise.md
+docs/análise-*.md

@@ -1,0 +1,10 @@
+[MARIADB]
+host = 127.0.0.1
+port = 3306
+user = rd_devices
+database = rd_devices_dev
+charset = utf8mb4
+
+[IMPORT]
+mode = upsert
+batch_size = 500

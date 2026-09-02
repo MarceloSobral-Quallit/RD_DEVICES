@@ -1,0 +1,86 @@
+# COLETOR Configuration Template
+# Data: 08/06/2026
+# Renomear para config.ini após customizar
+
+[DATABASE]
+# Caminho para banco de dados SQLite
+path = ./database/devices.db
+backup_dir = ./backups
+enable_logging = true
+
+[CREDENTIALS_LINUX_STORE]
+# Credenciais compartilhadas para B12, PDVs e terminais Linux.
+# Configure a senha pela aba Credenciais (grava criptografada). Sem senha aqui.
+port = 22
+user = pdv
+password =
+timeout = 30
+
+[CREDENTIALS_TERMINAL_WINDOWS_DROGASIL]
+# Credenciais Windows para terminais Drogasil.
+# Configure a senha pela aba Credenciais (grava criptografada).
+port = 135
+user = drogasil
+domain =
+password =
+timeout = 30
+
+[CREDENTIALS_TERMINAL_WINDOWS_RAIA]
+# Credenciais Windows para terminais Raia.
+# Configure a senha pela aba Credenciais (grava criptografada).
+port = 135
+user = drogaraia
+domain =
+password =
+timeout = 30
+
+[CREDENTIALS_SNMP]
+# Credenciais SNMP para impressoras
+community = public
+port = 161
+timeout = 5
+
+[PATHS]
+# Diretórios de trabalho
+xls_dir = ./src
+output_dir = ./output
+log_dir = ./logs
+scripts_dir = ../
+temp_dir = ./temp
+
+[WORKERS]
+# Configurações padrão de paralelismo
+ssh_default = 4
+network_default = 8
+java_default = 8
+ip_workers = 4
+max_workers = 32
+
+[UI]
+# Configurações de interface
+theme = default
+window_width = 1200
+window_height = 800
+console_font_size = 10
+console_lines = 1000
+auto_scroll = true
+
+[BEHAVIOR]
+# Comportamento geral
+confirm_truncate = true
+auto_backup = true
+venv_required = true
+check_version_on_startup = true
+
+[HISTORY]
+# Histórico de execuções
+max_history = 100
+save_last_tab = true
+save_last_values = true
+
+[LOGGING]
+# Configurações de logging
+level = INFO
+file_path = ./logs/coletor.log
+max_file_size = 10485760
+backup_count = 5

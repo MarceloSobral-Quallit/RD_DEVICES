@@ -1,0 +1,64 @@
+; -----------------------------------------------------------------------------
+; config/config.ini  -  Configuracao de build/publicacao (NAO versionar o real)
+; -----------------------------------------------------------------------------
+; Copie este arquivo para config/config.ini e preencha com os dados reais.
+;
+; Cada servidor fisico e declarado uma unica vez, com toda a sua identidade
+; de conexao (host/porta/usuario/senha/chave/diretorios). Os papeis abaixo
+; ([deploy_server]/[storage_server]/[download_server]) apenas selecionam
+; qual servidor usar via "active_profile" -- de forma independente entre si,
+; permitindo por exemplo compilar em um host e publicar em outro.
+; Nao inclua "host_key" nos perfis; ela pertence a cada papel.
+;
+; Senha: texto puro ou prefixo "b64:" (base64). Nao versione a senha real.
+; -----------------------------------------------------------------------------
+
+[servidor1]
+host = 10.0.0.10
+port = 22
+user = deploy
+auth = password
+password = CHANGE_ME
+key_file =
+root_dir = /srv/rd_devices
+auto_root_dir = /srv/rd_devices/auto
+
+[servidor2]
+host = 10.0.0.11
+port = 22
+user = deploy
+auth = password
+password = CHANGE_ME
+key_file =
+root_dir = /srv/rd_devices
+auto_root_dir = /srv/rd_devices/auto
+
+[deploy_server]
+# Servidor onde o build e executado (uso futuro / build remoto).
+enabled = 0
+active_profile = servidor1
+host_key =
+protocol = scp
+
+[storage_server]
+# Servidor de arquivamento dos pacotes de release (uso futuro).
+enabled = 0
+active_profile = servidor1
+host_key =
+protocol = scp
+remote_dir = /srv/rd_devices/storage
+
+[download_server]
+# Publicacao do pacote do COLETOR pelo build:
+#   python tools/build_release.py --component all --bump none --build-type onefile --sign --publish
+# Publica sempre com o nome fixo file_name; conteudo = COLETOR.exe + config.ini.
+# protocol: scp/sftp (paramiko) ou local (copia para dest_dir; aceita caminho UNC).
+enabled = 0
+active_profile = servidor1
+host_key =
+protocol = scp
+remote_dir = /var/www/downloads/rd_devices
+file_name = RD-COLETOR.zip
+public_base_url = https://exemplo.local/downloads/RD-COLETOR/
+# Usado apenas quando protocol = local:
+dest_dir =

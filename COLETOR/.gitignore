@@ -1,0 +1,84 @@
+# COLETOR .gitignore
+# Data: 09/06/2026
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Ambiente Virtual
+venv/
+ENV/
+env/
+.venv
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Config & Credenciais
+config.ini
+config.*.ini
+*.ini
+!config.ini.template
+
+# Banco de dados
+work/
+*.db
+*.sqlite
+*.sqlite3
+
+# Logs & Temp
+logs/
+*.log
+temp/
+*.tmp
+
+# Backups
+backups/
+*.bak
+*.backup
+*.zip
+
+# Build output
+dist/
+build/
+*.exe
+*.app
+
+# IDE
+.project
+.pydevproject
+.settings/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Arquivos sensíveis
+*.pfx
+*.pem
+*.key
+.coletor_secret.key
+.ssh/

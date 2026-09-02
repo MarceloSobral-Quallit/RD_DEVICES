@@ -1,0 +1,33 @@
+# COLETOR Requirements
+# Data: 09/06/2026
+
+# Framework GUI (tkinter é built-in, não precisa instalar)
+
+# Banco de dados local
+# sqlite3 é built-in
+
+# XLS Import
+xlrd>=2.0.1
+
+# Conectividade SSH
+paramiko>=3.0.0
+
+# Criptografia local de senhas de configuração
+cryptography>=42.0.0
+
+# WMI (Windows only)
+pywin32>=305 ; sys_platform=='win32'
+WMI>=1.5.1 ; sys_platform=='win32'
+
+# Compilação para .exe
+pyinstaller>=6.0.0
+
+# Logging com cores
+colorama>=0.4.6
+
+# CLI helpers (opcional)
+click>=8.0.0
+
+# SNMP (impressoras)
+# A aba Hardware usa a API síncrona clássica getCmd/CommunityData de pysnmp.hlapi.
+pysnmp>=6.0.0,<7.0.0

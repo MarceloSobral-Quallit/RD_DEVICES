@@ -1,0 +1,3 @@
+"""
+Módulo common - Componentes comuns
+"""
