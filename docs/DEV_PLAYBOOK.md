@@ -104,14 +104,15 @@ Validacao:
 Objetivo: colocar o projeto sob git com o repositorio privado `github.com/MarceloSobral-Quallit/RD_DEVICES`.
 
 Feito:
-- `git init` + branch `main` + `origin` = `https://github.com/MarceloSobral-Quallit/RD_DEVICES.git` (repo **privado**, estava vazio).
-- `.gitignore` reforcado: `*.pfx`/`*.p12`/`*.pem`, `tools/certs/`, `*.db-shm`/`-wal`/`-journal`, `release/`, `.specstory/`, `PROJETO_ORIGINAL/`.
-- Commit inicial `3b07a8b` (96 arquivos, ~2,2 MB) e `git push -u origin main`. Auditado: nenhum segredo no tree (`tools/certs/`, `.integrador_secret.key`, `config/config.ini`, `www/config.web.php`, `*.db` confirmados ausentes via `git cat-file -e`).
+- `git init` + `origin` = `https://github.com/MarceloSobral-Quallit/RD_DEVICES.git` (repo **privado**, estava vazio).
+- `.gitignore` reforcado: `*.pfx`/`*.p12`/`*.pem`, `tools/certs/`, `*.db-shm`/`-wal`/`-journal`, `release/`, `.specstory/`, `PROJETO_ORIGINAL/`, `analise*.md`.
+- **Sanitizacao** (`sanitize o projeto`): `COLETOR/config.ini.template` sem senhas de loja (configurar pela aba Credenciais); `config/` e `INTEGRADOR/config.ini.template` com hosts/usuarios/caminhos genericos; IPs internos de `www/*` e do cabecalho dos dumps `docs/mariadb_*` trocados por placeholder; `analise*.md` (transcricoes com IPs/creds em texto puro) removidas do repo (mantidas locais).
+- **Historico reescrito**: apos a sanitizacao, os 3 commits iniciais (que ainda continham os segredos no historico) foram substituidos por **um unico commit** `646c8cb` via branch orfa + `git push --force`. Varredura `git rev-list --all | git grep` por `pdv2002`/`infoway2007`/`192.168.10.111`/`b64:cGR2...` = **nenhum resultado em nenhum commit**. Reflog expirado + `git gc --prune=now` local.
 - `DEFAULT_SIGN_PASSWORD` mantido hardcoded em `build_release.py` por decisao (repo privado; o `.pfx` nao esta no repo, cert e self-signed).
 
 Pendente:
-- Ajuste local: `git config --global credential.helper manager` (config aponta para `credential-manager-core`, nome antigo — push funcionou, mas gera warning).
-- Se o repo um dia virar publico: mover a senha de assinatura para env var e rotacionar os segredos.
+- **Rotacionar os segredos que circularam**: senhas `pdv`/`drogasil`/`drogaraia` da frota e a chave Fernet `.integrador_secret.key` (estiveram no historico antes do rewrite e em `analise*.md` locais).
+- Ajuste local opcional: `git config --global credential.helper manager` (config aponta para `credential-manager-core`, nome antigo — push funciona, so gera warning).
 
 ---
 
