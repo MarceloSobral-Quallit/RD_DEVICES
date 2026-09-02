@@ -1,2 +1,2 @@
-Versao: 1.27.09.26
-Atualizado em: 02/09/2026 18:49:28
+Versao: 1.28.09.26
+Atualizado em: 02/09/2026 19:00:24

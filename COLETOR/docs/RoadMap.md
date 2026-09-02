@@ -4,7 +4,17 @@ Registro incremental de mudanças funcionais por versão. Ordem cronológica rev
 
 ---
 
-## Próxima versão — correções pós-coleta Autopilot
+## v1.28.09.26 — 02/09/2026
+
+- **Aba 7 — feedback no console durante a preparação:** a primeira linha do worker
+  (`Etapa B12: iniciando…`) só saía depois de resolver as lojas, limpar o banco (modo
+  "Limpar e recomeçar"), montar os alvos de scan das 3805 lojas e abrir as runs — dezenas de
+  segundos com o "Log em Tempo Real" em branco. Agora o worker loga cada passo:
+  `Preparando pipeline...`, `Limpando dados da coleta anterior...` /
+  `Verificando o que ja foi coletado...`, `Preenchendo a tabela de progresso (N)...`,
+  `Montando alvos de Scan Loja (N)...`, `N alvo(s) de Scan Loja. Abrindo registros...`.
+
+## v1.27.09.26 — 02/09/2026 — correções pós-coleta Autopilot
 
 Análise da coleta de 01–02/09/2026 (`temp/RD-COLETOR-2`, 3805 lojas): B12 100% `OFFLINE`
 nas 4 execuções, runs presas em `RUNNING`, runs marcadas `SUCCESS` com etapa 100% falha,

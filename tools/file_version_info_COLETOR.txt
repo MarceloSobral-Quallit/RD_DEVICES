@@ -2,8 +2,8 @@
 VSVersionInfo(
   ffi=FixedFileInfo(
     mask=0x3f,
-    filevers=(1, 27, 9, 26),
-    prodvers=(1, 27, 9, 26),
+    filevers=(1, 28, 9, 26),
+    prodvers=(1, 28, 9, 26),
     flags=0x0,
     OS=0x40004,
     fileType=0x1,
@@ -14,13 +14,13 @@ VSVersionInfo(
     StringTable(u'041604E4', [
       StringStruct(u'CompanyName', u'Quallit'),
       StringStruct(u'FileDescription', u'Preventiva Coletor'),
-      StringStruct(u'FileVersion', u'1.27.09.26'),
+      StringStruct(u'FileVersion', u'1.28.09.26'),
       StringStruct(u'InternalName', u'COLETOR'),
       StringStruct(u'LegalCopyright', u'(c) Quallit - Todos os direitos reservados'),
       StringStruct(u'OriginalFilename', u'Coletor.exe'),
       StringStruct(u'ProductName', u'Preventiva Coletor'),
-      StringStruct(u'ProductVersion', u'1.27.09.26'),
-      StringStruct(u'BuildDate', u'02/09/2026 18:49:28'),
+      StringStruct(u'ProductVersion', u'1.28.09.26'),
+      StringStruct(u'BuildDate', u'02/09/2026 19:00:24'),
       StringStruct(u'BuildComponent', u'coletor')
     ])
   ]), VarFileInfo([VarStruct(u'Translation', [1046, 1252])])

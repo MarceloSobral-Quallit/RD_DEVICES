@@ -799,6 +799,7 @@ class Tab7Autopilot(ttk.Frame):
         run_ids = {}
         pipeline_finalized = False
         try:
+            self._log("Preparando pipeline...", "INFO")
             xls_path = self.var_xls_path.get().strip()
             if xls_path:
                 self._log(f"Importando XLS: {xls_path}", "INFO")
@@ -848,8 +849,10 @@ class Tab7Autopilot(ttk.Frame):
             retry_b12 = retry_scan = retry_hw = set()
             stage_complete = {"b12": False, "scan": False, "hw": False}
             if mode == "fresh":
+                self._log("Limpando dados da coleta anterior...", "INFO")
                 self._clear_collected_data()
             else:
+                self._log("Verificando o que ja foi coletado na ultima execucao...", "INFO")
                 for scan_type, kind in (("B12", "b12"), ("SCAN_LOJA", "scan"), ("HARDWARE", "hw")):
                     info = get_pending_items(self.config_mgr, scan_type)
                     if not info["run_id"] and not info.get("complete"):
@@ -902,6 +905,7 @@ class Tab7Autopilot(ttk.Frame):
                     return key not in done_set
                 return True  # fresh
 
+            self._log(f"Preenchendo a tabela de progresso ({len(stores)} loja(s))...", "INFO")
             for s in stores:
                 self.after(0, self._init_store_row, s['filial'])
 
@@ -929,6 +933,7 @@ class Tab7Autopilot(ttk.Frame):
             workers_scan = max(1, int(self.spin_workers_scan.get()))
             workers_hw = max(1, int(self.spin_workers_hw.get()))
 
+            self._log(f"Montando alvos de Scan Loja ({len(stores)} loja(s))...", "INFO")
             store_targets = {}
             total_scan_targets = 0
             for s in stores:
@@ -939,6 +944,7 @@ class Tab7Autopilot(ttk.Frame):
                 ]
                 store_targets[s['filial']] = targets
                 total_scan_targets += len(targets)
+            self._log(f"{total_scan_targets} alvo(s) de Scan Loja. Abrindo registros de execucao...", "INFO")
 
             run_ids.update({
                 "B12": start_scan_run(self.config_mgr, "B12", "autopilot", total_items=len(stores), selected_count=len(stores)),
